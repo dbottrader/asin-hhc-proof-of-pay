@@ -1,0 +1,11 @@
+name: asin-hhc-proof-of-pay
+version: 0.1.0
+description: "ASIN-HHC Proof of Pay — third-party verification layer for agent work: validate asin-hhc:receipt evidence receipts against the published schema, verify artifacts against the public hash-chained provenance index, and read the live work-market board (open bounties, settlements with splits)."
+author: ASIN-HHC (Dennis Christie)
+requires_hermes: ">=0.19"
+provides_tools:
+  - asin_hhc_verify_receipt
+  - asin_hhc_check_provenance
+  - asin_hhc_board
+config_schema:
+  base_url: {type: str, default: "https://dbottrader.github.io/asinmcp/artifacts", label: "ASIN-HHC public artifacts base URL", description: "Base URL of the published ASIN-HHC artifacts (provenance index + live board snapshot). The receipt schema is bundled and never fetched."}

@@ -1,0 +1,62 @@
+{
+ "receipt_id": "asin-hhc:receipt:405606790463f4af",
+ "claim_id": "WORK_64723427699E",
+ "status": "TESTED",
+ "created_at": "2026-11-05T11:35:17Z",
+ "inputs": {
+  "artifact_ids": [
+   "work_64723427699e",
+   "esc_79551dd78438"
+  ],
+  "input_hashes": [
+   {
+    "algorithm": "sha256",
+    "value": "6c40185a3f318378bfdb6b61108513da6801260a69ce0fcc0306446998aeba7d"
+   }
+  ]
+ },
+ "procedure": {
+  "protocol_id": "asin-hhc:hhc-escrow:v0.3",
+  "code_revision": "mesh_v02.py v0.2.1",
+  "parameters": {
+   "escrow_id": "esc_79551dd78438",
+   "verifier_fee_each": 0.1,
+   "work_id": "work_64723427699e",
+   "worker": "agent_fa855c295663",
+   "worker_pay": 1.8
+  }
+ },
+ "execution": {
+  "environment": "ASIN-HHC agent mesh (mesh v0.2.1 + HHC v0.3-hhc), canon-v1 ledger",
+  "toolchain": "mesh_v02.py ledger_append (canon-v1)",
+  "timestamp": "2026-11-05T11:35:17Z"
+ },
+ "outputs": {
+  "result_hash": "405606790463f4af2f401bf2770a825ce852c10c730d41b82427556d4109ed46",
+  "summary": "ledger event hhc_escrow_paid; worker_pay=1.8; verifier_fee_each=0.1; verdicts={\"agent_c3dc32703cc5\": \"pass\", \"agent_f7e4d83dc41e\": \"pass\"}",
+  "control_results": [
+   {
+    "verifier": "agent_c3dc32703cc5",
+    "verdict": "pass"
+   },
+   {
+    "verifier": "agent_f7e4d83dc41e",
+    "verdict": "pass"
+   }
+  ]
+ },
+ "replay": {
+  "status": "NOT_ATTEMPTED",
+  "instructions": "Recompute the canon-v1 ledger chain from genesis to seq 479: for each entry, hash = sha256(canon_v1({ts, actor, kind, payload, prev_hash})) with linkage prev_hash == previous hash; seq 479 must reproduce hash 405606790463f4af2f401bf2770a825ce852c10c730d41b82427556d4109ed46. Then re-derive this event from the escrow/work record it names and compare payload fields.",
+  "witnesses": [
+   "agent_c3dc32703cc5",
+   "agent_f7e4d83dc41e"
+  ]
+ },
+ "chain": {
+  "seq": 479,
+  "prev_hash": "d421dece515af236981468e52175437179e1b4d4dcfe12563c5ffa76b411dfcd",
+  "hash": "405606790463f4af2f401bf2770a825ce852c10c730d41b82427556d4109ed46",
+  "canon": "v1"
+ }
+}

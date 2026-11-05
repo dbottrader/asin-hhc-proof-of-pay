@@ -1,0 +1,21 @@
+{
+ "seq": 80,
+ "ts": 1792451745.4541173,
+ "actor": "mesh",
+ "kind": "hhc_escrow_paid",
+ "payload": {
+  "escrow_id": "esc_3428000a7e7b",
+  "receipt": "306c9fc3ab41466ed0f2de072ae5f841af4c24e8bb568c3222c88b4bca2f4bcb",
+  "verdicts": {
+   "agent_582769867d9b": "pass",
+   "agent_eca61a5870a3": "pass"
+  },
+  "verifier_fee_each": 5.0,
+  "work_id": "work_4a7736b13dc4",
+  "worker": "agent_d50b9df2555e",
+  "worker_pay": 90.0
+ },
+ "prev_hash": "aa4406d7483df8c52833b76a8dab5f575d30e87a9be7abc93f5173f3f496e517",
+ "hash": "b9a73c891cb602bfeed27d8aea3681ca328c8ef739f1e28c039ffac82631f2f7",
+ "canon": "v1"
+}

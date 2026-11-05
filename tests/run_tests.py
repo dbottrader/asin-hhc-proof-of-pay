@@ -6,10 +6,10 @@ package the way Hermes does (package import, register(ctx)) with a stub ctx
 that records registrations, then invokes the handlers exactly as the tool
 registry would (args dict in, JSON string out).
 
-Network tests hit the REAL public URLs. The board tool is additionally
-exercised against the freshly exported live snapshot via a file:// URL,
-because the public live.json endpoint is checked (and its status recorded)
-in the same run.
+Network tests hit the REAL public URLs. (The board tool used to be
+exercised against a local snapshot via a file:// snapshot_url override;
+that override was removed for URL safety in the 2026-11-05 Teknium fix,
+so the board tests now read the public live.json directly.)
 """
 import importlib.util
 import json
@@ -122,26 +122,69 @@ check("entry lookup by name finds an entry with recomputed hash OK",
       out_e.get("entry") is not None and out_e.get("entry_hash_recomputed_ok") is True,
       f"entry={ (out_e.get('entry') or {}).get('name') }")
 
-# 5. board: public URL status, then the real exported snapshot via file://
-pub = J(H["asin_hhc_board"]({"query": "open"}))
-print(f"       public live.json via tool: ok={pub.get('ok')} {str(pub.get('error'))[:140]}")
-snap_path = "/home/hatch/workspace/implementation-mining/live-ui/live.json"
-out_b = J(H["asin_hhc_board"]({"query": "open", "snapshot_url": f"file://{snap_path}"}))
+# 5. board: the public live snapshot (snapshot_url override was removed
+# for URL safety — the tool always fetches the configured base_url host)
+out_b = J(H["asin_hhc_board"]({"query": "open"}))
 bounties = out_b.get("open_bounties", [])
-check("board 'open' lists the funded bounties from the real snapshot",
-      out_b.get("ok") is True and len(bounties) == 5 and out_b.get("open_bounties_total_hhc") == 13.0,
+check("board 'open' lists the funded bounties from the public snapshot",
+      out_b.get("ok") is True and len(bounties) >= 1
+      and abs((out_b.get("open_bounties_total_hhc") or 0)
+              - sum(b.get("price_hhc") or 0 for b in bounties)) < 0.011
+      and all(b.get("work_id") and b.get("escrow_id") for b in bounties),
       f"count={len(bounties)} total={out_b.get('open_bounties_total_hhc')} HHC")
-out_s = J(H["asin_hhc_board"]({"query": "settled", "snapshot_url": f"file://{snap_path}"}))
+out_s = J(H["asin_hhc_board"]({"query": "settled"}))
 st = out_s.get("settlements", {})
 check("board 'settled' returns settlement totals with splits",
       st.get("paid_count") is not None and st.get("settled_hhc_total") is not None
       and abs((st.get("to_workers_hhc") or 0) + (st.get("to_verifiers_hhc") or 0) - (st.get("settled_hhc_total") or 0)) < 0.011,
       json.dumps(st))
-out_sum = J(H["asin_hhc_board"]({"query": "summary", "snapshot_url": f"file://{snap_path}"}))
+out_sum = J(H["asin_hhc_board"]({"query": "summary"}))
 check("board 'summary' carries scoreboard + provenance head",
       out_sum.get("scoreboard", {}).get("agents") is not None
       and out_sum.get("provenance_head") == "fadbd275bc9885b12aa649af98e77d17a033aba6a22dc5dc12e6d8bc74fd85f6",
       f"agents={out_sum.get('scoreboard', {}).get('agents')}")
+
+# 6. URL safety (catalog review 2026-11-05): arbitrary / private URLs
+# must be refused; public https fetches must still work; the old
+# index_url / snapshot_url overrides are gone.
+import pop_client as _pc
+check("is_safe_url accepts a public https URL",
+      _pc.is_safe_url("https://dbottrader.github.io/asinmcp/artifacts/live.json")[0] is True)
+check("is_safe_url refuses http",
+      _pc.is_safe_url("http://dbottrader.github.io/asinmcp/artifacts/live.json")[0] is False)
+for _bad in ("https://localhost/x.json", "https://127.0.0.1/x.json",
+             "https://10.0.0.5/x.json", "https://192.168.1.1/x.json",
+             "https://169.254.169.254/latest/meta-data/",
+             "https://[::1]/x.json", "https://intranet/x.json",
+             "https://user:pass@example.com/x.json"):
+    check(f"is_safe_url refuses {_bad}",
+          _pc.is_safe_url(_bad)[0] is False)
+for _u, _why in (("http://dbottrader.github.io/asinmcp/artifacts/live.json", "http"),
+                 ("https://localhost/asin-hhc-receipt.schema.json", "localhost"),
+                 ("https://127.0.0.1/x.json", "loopback"),
+                 ("https://10.0.0.5/x.json", "private"),
+                 ("https://192.168.1.1/x.json", "private"),
+                 ("https://169.254.169.254/latest/meta-data/", "link-local")):
+    _o = J(H["asin_hhc_verify_receipt"]({"receipt_url": _u}))
+    check(f"receipt_url {_why} URL refused",
+          _o.get("ok") is False and "refused" in str(_o.get("error", "")).lower(),
+          str(_o.get("error"))[:120])
+# Positive control: a safe public https host fetches (an index is not a
+# receipt, so valid=False is the expected outcome — the point is the
+# fetch itself is allowed, not that the document validates).
+_o = J(H["asin_hhc_verify_receipt"](
+    {"receipt_url": "https://dbottrader.github.io/asinmcp/artifacts/specs/provenance-index.json"}))
+check("receipt_url public https host fetches (document fetched, not a receipt)",
+      _o.get("ok") is True and _o.get("valid") is False,
+      f"ok={_o.get('ok')} valid={_o.get('valid')} errors={_o.get('error_count')}")
+_o = J(H["asin_hhc_check_provenance"]({"index_url": "https://example.com/index.json"}))
+check("index_url override removed (returns error)",
+      _o.get("ok") is False and "removed" in str(_o.get("error", "")),
+      str(_o.get("error"))[:120])
+_o = J(H["asin_hhc_board"]({"query": "open", "snapshot_url": "https://example.com/live.json"}))
+check("snapshot_url override removed (returns error)",
+      _o.get("ok") is False and "removed" in str(_o.get("error", "")),
+      str(_o.get("error"))[:120])
 
 fails = [r for r in RESULTS if not r[1]]
 print(f"\n{len(RESULTS) - len(fails)}/{len(RESULTS)} checks passed")

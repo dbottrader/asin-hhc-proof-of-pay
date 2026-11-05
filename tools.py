@@ -35,8 +35,11 @@ def verify_receipt(args: dict, **kwargs) -> str:
             except (ValueError, TypeError) as e:
                 return _err(f"receipt_json is not valid JSON: {e}")
         if receipt is None and args.get("receipt_url"):
+            # Caller-supplied URL: fetched only if it passes the public-
+            # https safety gate (no http, no private/loopback/link-local
+            # host, no redirect to one). See pop_client.is_safe_url.
             try:
-                receipt = pop_client.fetch_json(args["receipt_url"])
+                receipt = pop_client.fetch_json(args["receipt_url"], external=True)
             except Exception as e:
                 return _err(f"could not fetch receipt_url: {e}")
         if receipt is None:
@@ -62,7 +65,17 @@ def verify_receipt(args: dict, **kwargs) -> str:
 def check_provenance(args: dict, **kwargs) -> str:
     """Verify the provenance index chain and look up one artifact in it."""
     try:
-        url = args.get("index_url") or pop_client.provenance_index_url()
+        # No URL override: the index is always fetched from the configured
+        # base_url host. An index_url argument used to let the model point
+        # the fetch at any host; it was removed for URL safety (catalog
+        # review 2026-11-05).
+        if args.get("index_url"):
+            return _err(
+                "index_url override was removed for URL safety: the "
+                "provenance index is fetched only from the configured "
+                "base_url host"
+            )
+        url = pop_client.provenance_index_url()
         try:
             doc = pop_client.fetch_json(url)
         except Exception as e:
@@ -91,7 +104,15 @@ def board(args: dict, **kwargs) -> str:
         query = (args.get("query") or "summary").lower()
         if query not in ("summary", "open", "settled"):
             return _err("query must be one of: summary, open, settled")
-        url = args.get("snapshot_url") or pop_client.live_snapshot_url()
+        # No URL override: the snapshot is always fetched from the
+        # configured base_url host (see check_provenance above).
+        if args.get("snapshot_url"):
+            return _err(
+                "snapshot_url override was removed for URL safety: the "
+                "live board snapshot is fetched only from the configured "
+                "base_url host"
+            )
+        url = pop_client.live_snapshot_url()
         try:
             snap = pop_client.fetch_json(url)
         except Exception as e:

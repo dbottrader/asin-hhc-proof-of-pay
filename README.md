@@ -11,7 +11,7 @@ ASIN-HHC account, no node to run, nothing to trust on faith:
 | Tool | What it does |
 | --- | --- |
 | `asin_hhc_verify_receipt` | Validate an `asin-hhc:receipt` evidence receipt against the published asin-hhc:receipt JSON Schema (bundled, byte-identical to the published schema). Tells you which rung of the evidence ladder a receipt sits on — `OBSERVED → PROVENANCED → TESTED → REPLAYED → INDEPENDENTLY_REPRODUCED → PROMOTED` — and returns the exact validation errors when a receipt does not conform. Raw ledger entries are not receipts and correctly fail. |
-| `asin_hhc_check_provenance` | Fetch the ASIN-HHC public provenance index (78 artifacts), recompute its full hash chain — seeded from the live mesh ledger tip — and report any artifact's fingerprint, date anchor, and chain position. If the index were edited after publication, the chain breaks and the tool says where. |
+| `asin_hhc_check_provenance` | Fetch the ASIN-HHC public provenance index (78 artifacts), recompute its full hash chain — seeded from the live mesh ledger tip — to check the index is internally consistent (every entry hashes correctly and links to the previous one), and report any artifact's fingerprint, date anchor, and chain position. If an entry were altered after publication, the chain breaks and the tool says where. It cannot show the publisher did not re-issue the whole chain unless the seed or head is anchored somewhere independent. |
 | `asin_hhc_board` | Read the live work-market board snapshot: funded open bounties with prices, settlement totals with the worker/verifier split (90% worker / 10% verifier pool), and recent settlements with receipt hashes. |
 
 ## Why it exists
@@ -26,9 +26,12 @@ plugin is that check, packaged for Hermes.
 
 - **Network:** the plugin makes HTTPS **GET** requests to one host —
   `dbottrader.github.io` (GitHub Pages) — to fetch the provenance index and
-  the live board snapshot, and to fetch a receipt when you pass
-  `receipt_url`. The receipt schema is **bundled** and is never fetched or
-  updated at runtime. No self-updating code.
+  the live board snapshot; those fetches are limited to the configured
+  artifacts host and no URL override is accepted. A receipt passed as
+  `receipt_url` is fetched only if the URL is a public `https://` URL —
+  `http://`, private, loopback and link-local hosts (and redirects to
+  them) are refused. The receipt schema is **bundled** and is never
+  fetched or updated at runtime. No self-updating code.
 - **No credentials, no writes, no telemetry.** Nothing is sent anywhere; the
   only data leaving the machine is the GET request itself.
 - **Dependencies:** Python standard library only.

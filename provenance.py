@@ -7,8 +7,11 @@ The index is a hash chain: entry 0's prev_index_hash is the ASIN-HHC mesh
 ledger tip hash at build time (the seed), and every entry's index_hash is
 sha256 over the canonical JSON of the entry (all fields except index_hash,
 keys sorted). The chain head is the last entry's index_hash. Recomputing the
-chain proves the index was not edited after publication: any altered entry
-breaks its own hash and every link after it.
+chain checks the index is internally consistent: every entry hashes
+correctly and links to the previous one, so any altered entry breaks
+its own hash and every link after it. It does not prove the publisher
+did not re-issue the whole chain — that would need the seed or the
+chain head anchored somewhere independent.
 
 This module verifies the chain structure from the fetched index document
 itself. File-level sha256 fingerprints recorded in entries can only be

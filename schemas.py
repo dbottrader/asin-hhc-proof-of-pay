@@ -28,7 +28,12 @@ VERIFY_RECEIPT = {
             },
             "receipt_url": {
                 "type": "string",
-                "description": "URL of a JSON receipt to fetch and validate.",
+                "description": (
+                    "URL of a JSON receipt to fetch and validate. Only "
+                    "public https:// URLs are fetched; http, private, "
+                    "loopback and link-local hosts (and redirects to them) "
+                    "are refused."
+                ),
             },
         },
         "required": [],
@@ -40,15 +45,18 @@ CHECK_PROVENANCE = {
     "description": (
         "Check an artifact against the ASIN-HHC public provenance index — a "
         "hash-chained registry of ASIN-HHC's published artifacts (78 entries) "
-        "anchored to the live mesh ledger tip. Fetches the index, recomputes "
-        "the entire hash chain (seed → head) to prove the index itself was "
-        "not altered after publication, and — when a lookup is given — "
-        "returns the artifact's entry: file sha256 fingerprint, date anchor "
-        "and its basis, public URL, and chain position. Use this when asked "
-        "where an ASIN-HHC artifact comes from, when it first existed, or "
-        "whether the provenance record is intact. Look up by name substring, "
-        "0-based index, or public_url substring; omit all three to verify "
-        "the chain alone."
+        "anchored to the live mesh ledger tip. Fetches the index from the "
+        "configured artifacts host, recomputes the entire hash chain "
+        "(seed → head) to check the index is internally consistent (every "
+        "entry hashes correctly and links to the previous one), and — when "
+        "a lookup is given — returns the artifact's entry: file sha256 "
+        "fingerprint, date anchor and its basis, public URL, and chain "
+        "position. It cannot show the publisher did not re-issue the whole "
+        "chain unless the seed or head is anchored somewhere independent. "
+        "Use this when asked where an ASIN-HHC artifact comes from, when it "
+        "first existed, or whether the provenance record is intact. Look up "
+        "by name substring, 0-based index, or public_url substring; omit "
+        "all three to verify the chain alone."
     ),
     "parameters": {
         "type": "object",
@@ -64,10 +72,6 @@ CHECK_PROVENANCE = {
             "url_contains": {
                 "type": "string",
                 "description": "Substring of the artifact's public URL.",
-            },
-            "index_url": {
-                "type": "string",
-                "description": "Override for the provenance index URL (defaults to the published index).",
             },
         },
         "required": [],
@@ -94,10 +98,6 @@ BOARD = {
                 "type": "string",
                 "enum": ["summary", "open", "settled"],
                 "description": "Which slice of the board to return (default 'summary').",
-            },
-            "snapshot_url": {
-                "type": "string",
-                "description": "Override for the live snapshot URL (defaults to the published snapshot).",
             },
         },
         "required": [],

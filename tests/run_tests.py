@@ -144,10 +144,26 @@ check("board 'summary' carries scoreboard + provenance head",
       and out_sum.get("provenance_head") == "fadbd275bc9885b12aa649af98e77d17a033aba6a22dc5dc12e6d8bc74fd85f6",
       f"agents={out_sum.get('scoreboard', {}).get('agents')}")
 
-# 6. URL safety (catalog review 2026-11-05): arbitrary / private URLs
-# must be refused; public https fetches must still work; the old
-# index_url / snapshot_url overrides are gone.
-import pop_client as _pc
+# 6. URL safety (catalog review 2026-11-05 + 2026-11-09): arbitrary /
+# private URLs must be refused; public https fetches must still work;
+# the old index_url / snapshot_url overrides are gone.
+import pop_client as _pc_top  # noqa: F401  (top-level copy; handlers use the package copy below)
+# NOTE: the handlers call the PACKAGE copy of pop_client
+# (asin_hhc_pop.pop_client, imported by tools.py), which is a different
+# module object from top-level pop_client — the DNS stub must patch the
+# package copy or the handlers never see it.
+_pc = plugin.tools.pop_client
+import socket as _socket
+# DNS stub: this machine's resolver answers every public hostname with
+# synthetic 198.18/15 addresses, which the new resolution check
+# correctly refuses — so the suite stubs DNS here with controlled
+# answers (a normal resolver's view) and tests the resolution logic
+# separately in 6b below. The stub only affects the check; real fetches
+# still go over the network via the proxy.
+_DNS_STUB = {"dbottrader.github.io": ["93.184.216.34"],
+             "example.com": ["93.184.216.34"]}
+_orig_resolve = _pc._resolve_addresses
+_pc._resolve_addresses = lambda host: _DNS_STUB.get(host, ["93.184.216.34"])
 check("is_safe_url accepts a public https URL",
       _pc.is_safe_url("https://dbottrader.github.io/asinmcp/artifacts/live.json")[0] is True)
 check("is_safe_url refuses http",
@@ -159,6 +175,57 @@ for _bad in ("https://localhost/x.json", "https://127.0.0.1/x.json",
              "https://user:pass@example.com/x.json"):
     check(f"is_safe_url refuses {_bad}",
           _pc.is_safe_url(_bad)[0] is False)
+# 6b. DNS resolution (catalog review 2026-11-09): the host is resolved
+# and every answer must be global; fail closed on lookup error.
+def _set_dns(answers):
+    _pc._resolve_addresses = lambda host: answers
+def _set_dns_error(host):
+    raise _socket.gaierror("Name or service not known")
+_set_dns(["93.184.216.34"])
+check("resolution accepts a hostname resolving to one global address",
+      _pc.is_safe_url("https://example.com/x.json")[0] is True)
+_set_dns(["2606:4700:4700::1111"])
+check("resolution accepts a globally-routable IPv6 answer",
+      _pc.is_safe_url("https://example.com/x.json")[0] is True)
+_set_dns(["127.0.0.1"])
+check("resolution refuses a hostname rebinding to loopback",
+      _pc.is_safe_url("https://evil.example.com/x.json")[0] is False)
+_set_dns(["10.0.0.5"])
+check("resolution refuses a hostname rebinding to a private address",
+      _pc.is_safe_url("https://evil.example.com/x.json")[0] is False)
+_set_dns(["169.254.169.254"])
+check("resolution refuses a hostname rebinding to cloud metadata",
+      _pc.is_safe_url("https://evil.example.com/x.json")[0] is False)
+_set_dns(["93.184.216.34", "10.0.0.5"])
+check("resolution refuses a mixed global+private answer set",
+      _pc.is_safe_url("https://example.com/x.json")[0] is False)
+_set_dns([])
+check("resolution refuses an empty answer set",
+      _pc.is_safe_url("https://example.com/x.json")[0] is False)
+_pc._resolve_addresses = _set_dns_error
+check("resolution fails closed on a lookup error",
+      _pc.is_safe_url("https://example.com/x.json")[0] is False)
+check("a literal global IP needs no DNS (passes even when lookups fail)",
+      _pc.is_safe_url("https://93.184.216.34/x.json")[0] is True)
+# Redirect hops resolve too: a redirect to a rebinding hostname or a
+# private literal is refused by the same gate.
+_pc._resolve_addresses = lambda host: (["127.0.0.1"] if host == "evil.example.com"
+                                      else ["93.184.216.34"])
+_h = _pc._SafeRedirectHandler(lambda u: _pc.is_safe_url(u))
+try:
+    _h.redirect_request(None, None, 302, "Found", {}, "https://evil.example.com/x.json")
+    _redir_ok = True
+except Exception:
+    _redir_ok = False
+check("redirect to a rebinding hostname refused", _redir_ok is False)
+try:
+    _h.redirect_request(None, None, 302, "Found", {}, "https://127.0.0.1/x.json")
+    _redir_ok2 = True
+except Exception:
+    _redir_ok2 = False
+check("redirect to a private literal refused", _redir_ok2 is False)
+# restore the general stub for the receipt_url tests below
+_pc._resolve_addresses = lambda host: _DNS_STUB.get(host, ["93.184.216.34"])
 for _u, _why in (("http://dbottrader.github.io/asinmcp/artifacts/live.json", "http"),
                  ("https://localhost/asin-hhc-receipt.schema.json", "localhost"),
                  ("https://127.0.0.1/x.json", "loopback"),

@@ -4,21 +4,34 @@ Fetches JSON documents from the ASIN-HHC public artifacts base
 (GitHub Pages). GET only, no credentials, no writes, short timeout so
 unattended runs fail cleanly instead of hanging.
 
-URL safety (catalog review, 2026-11-05): the model must never be able to
+URL safety (catalog review, 2026-11-05 + 2026-11-09): the model must never be able to
 make this plugin fetch an arbitrary URL. Internal fetches (provenance
 index, live board snapshot) go only to the configured base_url host over
 https. A caller-supplied receipt_url is fetched only if it passes
 is_safe_url: https scheme, a public (global) host, no userinfo, and no
-redirect — at any hop — to an unsafe target. The check is stdlib-only
-(urllib.parse + ipaddress + socket), mirroring the policy of Hermes'
-tools.url_safety.is_safe_url, so the plugin keeps no Hermes dependency.
+redirect — at any hop — to an unsafe target. The host is judged by form
+AND by DNS: the name is resolved with socket.getaddrinfo and every
+answer must be a global address (fail closed on a lookup error), so a
+public-looking name that resolves to a private address (DNS rebinding)
+is refused. When Hermes' tools.url_safety.is_safe_url imports, it is
+used for the resolution step instead — it resolves too, and Hermes'
+proxy fallback covers sandboxed environments that answer DNS with
+synthetic addresses. The check is otherwise stdlib-only
+(urllib.parse + ipaddress + socket), so the plugin keeps no Hermes
+dependency when that module is absent.
 """
 
 import ipaddress
 import json
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
+
+try:
+    from tools.url_safety import is_safe_url as _hermes_is_safe_url
+except Exception:  # Hermes not installed / module unavailable
+    _hermes_is_safe_url = None
 
 DEFAULT_BASE_URL = "https://dbottrader.github.io/asinmcp/artifacts"
 _TIMEOUT = 20
@@ -38,18 +51,15 @@ def base_url():
 
 
 def _host_is_global(host):
-    """True only for a public host, judged from the hostname as written —
-    deliberately WITHOUT a DNS lookup. Rationale, measured on this
-    machine: sandboxed/proxied environments return synthetic addresses
-    (e.g. 198.18.0.0/15) for every public hostname, so resolving here
-    would reject genuinely public hosts. Literal IPs must be global
-    (private, loopback, link-local, reserved, multicast and unspecified
-    all fail). Hostnames must be fully qualified public names: not
-    localhost, not *.local, not single-label (intranet) names. Residual
-    limitation, stated plainly: a hostile DNS answer (rebinding) is not
-    caught by this check — the same limitation Hermes' own is_safe_url
-    documents for its URL-form check. The fetch itself goes through the
-    user's normal network stack/proxy, which resolves the name."""
+    """True only for a public host, judged from the hostname as written.
+
+    This is the FORM check only — it never looks anything up. Literal IPs
+    must be global (private, loopback, link-local, reserved, multicast
+    and unspecified all fail). Hostnames must be fully qualified public
+    names: not localhost, not *.local, not single-label (intranet) names.
+    A dotted hostname that passes here still has to survive DNS
+    resolution in is_safe_url before anything is fetched.
+    """
     if not host:
         return False
     host = host.rstrip(".").lower()
@@ -67,16 +77,59 @@ def _host_is_global(host):
     return True
 
 
+def _resolve_addresses(host):
+    """DNS answers for host as a sorted list of address strings.
+
+    Separate seam so tests can stub DNS answers without touching the
+    network (the live environment resolves for real here).
+    """
+    infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    return sorted({info[4][0] for info in infos})
+
+
+def _resolved_host_is_global(host):
+    """True only if the host resolves and EVERY answer is global.
+
+    Literal IPs are judged directly, with no lookup. Hostnames are
+    resolved with getaddrinfo; the check fails closed on a lookup error
+    or an empty answer, and on any non-global answer (a public-looking
+    name that resolves to 127.0.0.1, 10.x, 169.254.169.254, or any other
+    private address is a DNS-rebinding attempt and is refused).
+    """
+    host = (host or "").rstrip(".").lower()
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_global
+    except ValueError:
+        pass  # hostname: resolve it below
+    try:
+        addresses = _resolve_addresses(host)
+    except (socket.gaierror, OSError):
+        return False
+    if not addresses:
+        return False
+    try:
+        return all(ipaddress.ip_address(a).is_global for a in addresses)
+    except ValueError:
+        return False
+
+
 def is_safe_url(url):
     """Public-https-only URL gate for caller-supplied URLs.
 
     Returns (safe: bool, reason: str). Safe means: https scheme, no
-    userinfo, a host present, and that host is public by form (see
-    _host_is_global). The gate judges the URL as written and does not
-    resolve DNS; a fetch after the check could in principle resolve
-    differently (DNS rebinding), which is the same property Hermes' own
-    is_safe_url has for its URL-form check — the gate is a policy check
-    on the requested URL, not a guarantee about the network path.
+    userinfo, a host present, that host is public by form (see
+    _host_is_global), AND the host resolves to global addresses only
+    (see _resolved_host_is_global). When Hermes'
+    tools.url_safety.is_safe_url imports, the resolution step delegates
+    to it — it resolves DNS and blocks non-global answers, the same
+    policy this gate implements with getaddrinfo; if that call fails,
+    this gate's own resolution check runs instead. A fetch after the
+    check could in principle resolve differently (DNS rebinding between
+    check and connect), so the gate is a policy check on the requested
+    URL at check time, not a guarantee about the network path.
     """
     try:
         parts = urllib.parse.urlsplit(str(url))
@@ -93,13 +146,34 @@ def is_safe_url(url):
             f"host {parts.hostname!r} is not a public host "
             "(private, loopback, link-local, reserved, or unresolvable)"
         )
+    if _hermes_is_safe_url is not None:
+        try:
+            verdict = _hermes_is_safe_url(url)
+        except Exception:
+            verdict = None
+        if verdict is not None:
+            if isinstance(verdict, tuple):
+                return bool(verdict[0]), (
+                    str(verdict[1]) if len(verdict) > 1 else ""
+                )
+            return bool(verdict), (
+                "" if verdict
+                else "refused by Hermes tools.url_safety.is_safe_url"
+            )
+    if not _resolved_host_is_global(parts.hostname):
+        return False, (
+            f"host {parts.hostname!r} does not resolve to global "
+            "addresses only"
+        )
     return True, ""
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Refuse any redirect whose target fails the same safety check as
     the original URL (for external fetches) or leaves the base host
-    (for internal fetches)."""
+    (for internal fetches). External redirect targets go through
+    is_safe_url, so every hop is resolved and checked, not just the
+    first URL."""
 
     def __init__(self, check):
         super().__init__()
@@ -138,9 +212,10 @@ def fetch_json(url, external=False):
     """Fetch and parse a JSON document. Raises OSError/ValueError on failure.
 
     external=False (default): only the configured base_url host, https.
-    external=True: any URL that passes is_safe_url (https, public host),
-    with redirects gated the same way. Caller-supplied URLs must use
-    external=True; internal artifact fetches must not.
+    external=True: any URL that passes is_safe_url (https, public host
+    resolved to global addresses only), with redirects gated the same
+    way at every hop. Caller-supplied URLs must use external=True;
+    internal artifact fetches must not.
     """
     if external:
         safe, reason = is_safe_url(url)
